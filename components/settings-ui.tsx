@@ -1,0 +1,2415 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  Bell,
+  BookOpen,
+  Check,
+  ChevronRight,
+  Database,
+  Download,
+  Eye,
+  EyeOff,
+  FileText,
+  HelpCircle,
+  Info,
+  Languages,
+  LayoutGrid,
+  Lock,
+  LogOut,
+  MessageCircle,
+  MessageSquare,
+  Monitor,
+  Package,
+  Phone,
+  Repeat2,
+  SaveIcon,
+  Shield,
+  ShieldCheck,
+  ShieldOff,
+  ShoppingBag,
+  Smartphone,
+  Sparkles,
+  Trash2,
+  Type,
+  Upload,
+  User,
+  UserCog,
+  UserX,
+  Users,
+  Volume2,
+  WifiOff,
+  X,
+  Zap,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { FEATURES } from "@/lib/feature-flags";
+import { useClerk } from "@clerk/nextjs";
+import {
+  readSettings,
+  writeSettings,
+  setSetting,
+  SETTINGS_CHANGE_EVENT,
+  type AppSettings,
+} from "@/lib/settings-store";
+import {
+  APP_SESSION_EVENT,
+  readAppSession,
+  writeAppSession,
+  clearAppSession,
+  type AppUserSession,
+} from "@/lib/client-session";
+import { FeedbackModal } from "@/components/feedback-modal";
+import { restartOnboardingTour } from "@/components/onboarding-tour";
+import { applySettings } from "@/components/theme-applicator";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const IS_DEV = process.env.NODE_ENV === "development";
+const LANG_KEY = "ms_language_pref";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getDisplayName(session: AppUserSession | null): string {
+  if (!session) return "Guest";
+  if (session.role === "client")       return (session as { firstName: string }).firstName;
+  if (session.role === "professional") return (session as { displayName: string }).displayName;
+  if (session.role === "salon")        return (session as { salonName: string }).salonName;
+  if (session.role === "team_member")  return (session as { firstName: string }).firstName;
+  if ((session.role as string) === "admin") return "Administrator";
+  if (session.role === "super_admin")  return "Super Admin";
+  return "Guest";
+}
+
+function getAccountLabel(session: AppUserSession | null): string {
+  if (!session || session.role === "guest") return "Not signed in";
+  if (session.role === "client")       return "Client account";
+  if (session.role === "professional") return "Professional account";
+  if (session.role === "salon")        return "Salon account";
+  if (session.role === "team_member")  return "Team member account";
+  if ((session.role as string) === "admin") return "Admin account";
+  if (session.role === "super_admin")  return "Super Admin account";
+  return "";
+}
+
+function maskPhone(phone: string): string {
+  if (!phone) return "your registered number";
+  const cleaned = phone.replace(/\D/g, "");
+  if (cleaned.length < 6) return phone;
+  const visible = cleaned.slice(-3);
+  const masked = cleaned.slice(0, -3).replace(/\d/g, "X");
+  return `+${masked}${visible}`;
+}
+
+function calcStorageUsed(): string {
+  if (typeof window === "undefined") return "< 1 KB";
+  try {
+    let bytes = 0;
+    for (const key of Object.keys(localStorage)) {
+      bytes += (localStorage.getItem(key) ?? "").length * 2;
+    }
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  } catch {
+    return "< 1 KB";
+  }
+}
+
+// ─── Language config ──────────────────────────────────────────────────────────
+
+const LANGUAGES = [
+  { code: "en", label: "English",   nativeLabel: "English",    dir: "ltr", supported: true },
+  { code: "sw", label: "Kiswahili", nativeLabel: "Kiswahili",  dir: "ltr", supported: true },
+  { code: "es", label: "Español",   nativeLabel: "Español",    dir: "ltr", supported: false },
+  { code: "fr", label: "Français",  nativeLabel: "Français",   dir: "ltr", supported: false },
+  { code: "ar", label: "Arabic",    nativeLabel: "العربية",    dir: "rtl", supported: false },
+  { code: "hi", label: "Hindi",     nativeLabel: "हिन्दी",     dir: "ltr", supported: false },
+  { code: "zh", label: "Chinese",   nativeLabel: "中文",       dir: "ltr", supported: false },
+  { code: "pt", label: "Português", nativeLabel: "Português",  dir: "ltr", supported: false },
+] as const;
+
+type LangCode = (typeof LANGUAGES)[number]["code"];
+
+interface LangPref {
+  code: LangCode;
+  label: string;
+  dir: string;
+}
+
+function readLangPref(): LangPref {
+  try {
+    const raw = localStorage.getItem(LANG_KEY);
+    if (raw) return JSON.parse(raw) as LangPref;
+  } catch { /* noop */ }
+  return { code: "en", label: "English", dir: "ltr" };
+}
+
+function saveLangPref(pref: LangPref): void {
+  try {
+    localStorage.setItem(LANG_KEY, JSON.stringify(pref));
+    document.documentElement.lang = pref.code;
+    document.documentElement.dir  = pref.dir;
+    window.dispatchEvent(new Event(SETTINGS_CHANGE_EVENT));
+  } catch { /* noop */ }
+}
+
+// ─── Toggle ───────────────────────────────────────────────────────────────────
+
+function Toggle({
+  on,
+  onChange,
+  disabled = false,
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  const ariaAttrs = {
+    role: "switch",
+    "aria-label": "Toggle setting",
+    "aria-checked": on ? "true" : "false",
+  } as const;
+
+  return (
+    <button
+      type="button"
+      {...ariaAttrs}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={cn(
+        "relative inline-flex h-[26px] w-[46px] shrink-0 items-center rounded-full border-2 transition-colors duration-200",
+        on
+          ? "border-[var(--color-accent)] bg-[var(--color-accent)]"
+          : "border-gray-300 bg-gray-300  ",
+        disabled && "cursor-not-allowed opacity-40",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform duration-200",
+          on ? "translate-x-[22px]" : "translate-x-[2px]",
+        )}
+      />
+    </button>
+  );
+}
+
+// ─── Select pill ──────────────────────────────────────────────────────────────
+
+function SelectPill<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex gap-1">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "rounded-full px-3 py-1 text-[11px] font-semibold transition",
+            o.value === value
+              ? "bg-[var(--color-action-primary)] text-[var(--color-action-primary-text)] shadow-sm"
+              : "bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-card)]",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <p className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-clay-text)]">
+        {title}
+      </p>
+      <div className="overflow-hidden rounded-[18px] bg-[var(--surface-card)] border border-[var(--border-subtle)] shadow-sm">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Row variants ─────────────────────────────────────────────────────────────
+
+interface RowBase {
+  icon: any;
+  label: string;
+  sub?: string;
+  danger?: boolean;
+  iconBg?: string;
+  dim?: boolean;
+}
+
+interface ToggleRow extends RowBase {
+  kind: "toggle";
+  on: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}
+
+interface LinkRow extends RowBase {
+  kind: "link";
+  href?: string;
+  onClick?: () => void;
+  value?: string;
+  readOnly?: boolean;
+}
+
+interface SelectRow extends RowBase {
+  kind: "select";
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}
+
+type RowDef = ToggleRow | LinkRow | SelectRow;
+
+function Row({ def, last }: { def: RowDef; last: boolean }) {
+  const Icon = def.icon;
+  const isReadOnly = def.kind === "link" && def.readOnly;
+
+  const iconBg    = def.iconBg ?? (def.danger ? "bg-red-50" : "bg-[var(--surface-card)]");
+  const iconColor = def.danger ? "text-red-500" : "text-[var(--color-secondary)]";
+
+  const inner = (
+    <div
+      className={cn(
+        "flex items-center gap-3.5 px-4 py-3.5",
+        !last && "border-b border-[var(--border-subtle)]/60",
+        def.dim && "opacity-50",
+      )}
+    >
+      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]", iconBg)}>
+        <Icon className={cn("h-[18px] w-[18px]", iconColor)} strokeWidth={1.85} />
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <p className={cn("text-[14px] font-semibold leading-snug", def.danger ? "text-red-500" : "text-[var(--text-primary)]")}>
+          {def.label}
+        </p>
+        {def.sub && (
+          <p className="mt-0.5 text-[11px] leading-4 text-[var(--color-secondary)]">{def.sub}</p>
+        )}
+      </div>
+
+      {def.kind === "toggle" && (
+        <Toggle on={def.on} onChange={def.onChange} disabled={def.disabled} />
+      )}
+      {def.kind === "link" && !isReadOnly && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          {def.value && (
+            <span className="text-[12px] text-[var(--color-secondary)]">{def.value}</span>
+          )}
+          <ChevronRight className="h-4 w-4 text-[var(--border-subtle)]" />
+        </div>
+      )}
+      {def.kind === "link" && isReadOnly && def.value && (
+        <span className="shrink-0 text-[12px] text-[var(--color-secondary)]">{def.value}</span>
+      )}
+      {def.kind === "select" && (
+        <SelectPill
+          value={def.value}
+          options={def.options}
+          onChange={def.onChange}
+        />
+      )}
+    </div>
+  );
+
+  if (def.kind === "link") {
+    if (isReadOnly) {
+      return <div className="cursor-default pointer-events-none">{inner}</div>;
+    }
+    if (def.href) {
+      return (
+        <Link href={def.href} className="block transition hover:bg-[var(--surface-card)]/50">
+          {inner}
+        </Link>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={def.onClick}
+        className="w-full text-left transition hover:bg-[var(--surface-card)]/50"
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return <div>{inner}</div>;
+}
+
+function RowGroup({ rows }: { rows: RowDef[] }) {
+  return (
+    <>
+      {rows.map((def, i) => (
+        <Row key={def.label} def={def} last={i === rows.length - 1} />
+      ))}
+    </>
+  );
+}
+
+// ─── OTP boxes ────────────────────────────────────────────────────────────────
+
+function OtpBoxes({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+  const digits = (value + "      ").slice(0, 6).split("");
+
+  function handleChange(i: number, ch: string) {
+    const d = ch.replace(/\D/g, "").slice(-1);
+    const next = [...digits];
+    next[i] = d || " ";
+    const newVal = next.join("").trimEnd().slice(0, 6);
+    onChange(newVal);
+    if (d && i < 5) refs.current[i + 1]?.focus();
+  }
+
+  function handleKeyDown(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace") {
+      if (!digits[i]?.trim() && i > 0) {
+        refs.current[i - 1]?.focus();
+      }
+      const next = [...digits];
+      next[i] = " ";
+      onChange(next.join("").trimEnd());
+    }
+    if (e.key === "ArrowLeft" && i > 0) refs.current[i - 1]?.focus();
+    if (e.key === "ArrowRight" && i < 5) refs.current[i + 1]?.focus();
+  }
+
+  return (
+    <div className="flex justify-center gap-2">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <input
+          key={i}
+          ref={(el) => { refs.current[i] = el; }}
+          type="text"
+          inputMode="numeric"
+          aria-label={`Digit ${i + 1}`}
+          maxLength={1}
+          value={digits[i]?.trim() ?? ""}
+          onChange={(e) => handleChange(i, e.target.value)}
+          onKeyDown={(e) => handleKeyDown(i, e)}
+          onFocus={(e) => e.target.select()}
+          className="h-12 w-10 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--surface-card)] text-center text-lg font-bold text-[var(--text-primary)] outline-none transition focus:border-[var(--color-ink)] focus:ring-2 focus:ring-[var(--color-ink)]/20"
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Dev OTP banner ───────────────────────────────────────────────────────────
+
+function DevOtpBanner({ otp }: { otp: string }) {
+  if (!IS_DEV) return null;
+  return (
+    <div className="rounded-[12px] bg-amber-50 px-4 py-3">
+      <p className="text-[11px] leading-5 text-amber-700">
+        <strong>Dev mode —</strong> the server returned this test code for local runs only:{" "}
+        <span className="font-mono font-bold tracking-widest">{otp}</span>
+        <br />
+        This banner never appears in production. In production the code is sent
+        by real SMS to the user&apos;s phone.
+      </p>
+    </div>
+  );
+}
+
+// ─── Phone change sheet ───────────────────────────────────────────────────────
+
+function PhoneChangeSheet({
+  currentPhone,
+  onSaved,
+  onCancel,
+}: {
+  currentPhone: string;
+  onSaved: (newPhone: string) => void;
+  onCancel: () => void;
+}) {
+  const [step,    setStep]    = useState<"number" | "otp">("number");
+  const [number,  setNumber]  = useState("");
+  const [otp,     setOtp]     = useState("");
+  const [verifySid, setVerifySid] = useState("");
+  const [providerChannel, setProviderChannel] = useState<"sms" | "whatsapp">("sms");
+  const [isTestMode, setIsTestMode] = useState(false);
+  const [devOtpHint, setDevOtpHint] = useState("");
+  const [error,   setError]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [info,    setInfo]    = useState("");
+
+  // REAL verification: code is generated and delivered server-side through the
+  // configured OTP provider (Africa's Talking SMS when PHONE_OTP_PROVIDER is
+  // set). Nothing is ever generated or compared in the browser. Server writes
+  // the verified phone to the user record; the client only mirrors it.
+  async function handleSendCode() {
+    const cleaned = number.replace(/\D/g, "");
+    if (cleaned.length < 9) {
+      setError("Enter a valid Kenyan mobile number.");
+      return;
+    }
+    setError("");
+    setInfo("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/phone/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "start",
+          phone: cleaned.startsWith("254") ? `+${cleaned}` : `+254${cleaned.slice(-9)}`,
+          channel: "sms",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Could not send a verification code. Please try again.");
+      }
+      setVerifySid(data.sid || "");
+      setProviderChannel(data.channel === "whatsapp" ? "whatsapp" : "sms");
+      setIsTestMode(Boolean(data.isTestMode));
+      setDevOtpHint(data.devOtp ? String(data.devOtp) : "");
+      setInfo(data.message || "Verification code sent.");
+      setStep("otp");
+    } catch (err: any) {
+      setError(err?.message || "Could not send a verification code. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerify() {
+    const cleaned = number.replace(/\D/g, "");
+    if (otp.trim().length !== 6) {
+      setError("Enter the 6-digit code.");
+      return;
+    }
+    setError("");
+    setInfo("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/phone/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "verify",
+          phone: cleaned.startsWith("254") ? `+${cleaned}` : `+254${cleaned.slice(-9)}`,
+          code: otp.trim(),
+          channel: providerChannel,
+          sid: verifySid || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Invalid verification code. Please try again.");
+      }
+      onSaved(data.phone || `+254${cleaned.slice(-9)}`);
+    } catch (err: any) {
+      setError(err?.message || "Verification failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-t-[28px] bg-[var(--surface-card)] border border-[var(--border-subtle)] sm:rounded-[28px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-[var(--border-subtle)]" />
+        <div className="p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-[var(--surface-elevated)]">
+              <Phone className="h-6 w-6 text-[var(--color-primary)]" strokeWidth={1.85} />
+            </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Close dialog"
+              className="mt-1 rounded-full p-1 text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {step === "number" ? (
+            <>
+              <h2 className="text-[18px] font-bold text-[var(--text-primary)]">Change phone number</h2>
+              <p className="mt-1 text-[13px] leading-5 text-[var(--text-secondary)]">
+                Current: <span className="font-semibold text-[var(--text-primary)]">{maskPhone(currentPhone)}</span>
+              </p>
+              <div className="mt-4">
+                <label className="mb-1.5 block text-[12px] font-semibold text-[var(--text-primary)]">
+                  New number
+                </label>
+                <div className="flex overflow-hidden rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-card)] focus-within:border-[var(--color-ink)] transition">
+                  <span className="flex items-center border-r border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 text-[14px] font-semibold text-[var(--text-primary)] select-none">
+                    +254
+                  </span>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={9}
+                    value={number}
+                    onChange={(e) => { setNumber(e.target.value.replace(/\D/g, "")); setError(""); }}
+                    placeholder="7XX XXX XXX"
+                    className="flex-1 bg-transparent px-3 py-3 text-[14px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                  />
+                </div>
+                {error && (
+                  <p className="mt-2 flex items-center gap-1.5 text-[12px] text-red-500">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    {error}
+                  </p>
+                )}
+              </div>
+              <div className="mt-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendCode}
+                  disabled={loading}
+                  className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {loading ? "Sending…" : "Send code"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="text-[18px] font-bold text-[var(--text-primary)]">Enter verification code</h2>
+              <p className="mt-1 text-[13px] leading-5 text-[var(--color-secondary)]">
+                We sent a 6-digit code to{" "}
+                <span className="font-semibold text-[var(--text-primary)]">+254 {number.slice(0, 3)} XXX XXX</span>
+              </p>
+              <div className="mt-5 space-y-4">
+                {IS_DEV && isTestMode && devOtpHint && <DevOtpBanner otp={devOtpHint} />}
+                {info && (
+                  <p className="text-[12px] font-medium text-[var(--text-secondary)]">{info}</p>
+                )}
+                <OtpBoxes value={otp} onChange={setOtp} />
+                {error && (
+                  <p className="flex items-center gap-1.5 text-[12px] text-red-500">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    {error}
+                  </p>
+                )}
+              </div>
+              <div className="mt-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setStep("number"); setOtp(""); setError(""); }}
+                  className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerify}
+                  disabled={loading || otp.trim().length !== 6}
+                  className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {loading ? "Verifying…" : "Verify & save"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Language picker modal ────────────────────────────────────────────────────
+
+function LanguageModal({
+  currentCode,
+  onSave,
+  onClose,
+}: {
+  currentCode: LangCode;
+  onSave: (pref: LangPref) => void;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<LangCode>(currentCode);
+
+  function handleSave() {
+    const lang = LANGUAGES.find((l) => l.code === selected);
+    if (!lang) return;
+    const pref: LangPref = { code: lang.code, label: lang.label, dir: lang.dir };
+    saveLangPref(pref);
+    onSave(pref);
+    onClose();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-t-[28px] bg-[var(--surface-card)] border border-[var(--border-subtle)] sm:rounded-[28px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-[var(--border-subtle)]" />
+        <div className="p-6">
+          <h2 className="text-[18px] font-bold text-[var(--text-primary)]">Language</h2>
+          <p className="mt-1 text-[13px] text-[var(--color-secondary)]">
+            Choose your preferred display language.
+          </p>
+          <div className="mt-4 rounded-[12px] bg-[var(--surface-elevated)] border border-[var(--border-subtle)] px-3 py-2.5">
+            <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
+              English is fully translated. Kiswahili is partially translated: selecting it saves your
+              language preference while interface translation coverage is completed. Additional
+              international languages are currently in preparation.
+            </p>
+          </div>
+          <div className="mt-4 space-y-2 max-h-[320px] overflow-y-auto">
+            {LANGUAGES.map((lang) => {
+              const active = selected === lang.code;
+              const isSupported = lang.supported;
+              return (
+                <button
+                  key={lang.code}
+                  type="button"
+                  disabled={!isSupported}
+                  onClick={() => isSupported && setSelected(lang.code)}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-[14px] px-4 py-3.5 transition text-left",
+                    active
+                      ? "bg-[var(--color-action-primary)] text-[var(--color-action-primary-text)]"
+                      : isSupported
+                        ? "bg-[var(--surface-card)] text-[var(--text-primary)] hover:bg-[var(--surface-elevated)]"
+                        : "bg-[var(--surface-card)]/50 text-[var(--color-secondary)] opacity-60 cursor-not-allowed",
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={cn("text-[14px] font-semibold", !active && isSupported && "text-[var(--text-primary)]")}>
+                      {lang.nativeLabel}
+                    </span>
+                    {lang.code !== "en" && (
+                      <span className={cn("text-[12px]", active ? "opacity-80" : "text-[var(--color-secondary)]")}>
+                        {lang.label}
+                      </span>
+                    )}
+                    {!isSupported && (
+                      <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-secondary)]">
+                        Coming soon
+                      </span>
+                    )}
+                    {lang.dir === "rtl" && (
+                      <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-bold", active ? "bg-[var(--color-action-primary-text)]/20 text-[var(--color-action-primary-text)]" : "bg-amber-500/15 text-amber-700 ")}>
+                        RTL
+                      </span>
+                    )}
+                  </div>
+                  {active && <Check className="h-4 w-4 text-[var(--color-action-primary-text)]" strokeWidth={2.5} />}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-5 flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+            >
+              Cancel
+            </button>
+            <button onClick={handleSave} aria-label="Save changes"><SaveIcon /></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Two-factor authentication modal ─────────────────────────────────────────
+
+function TwoFactorModal({
+  mode,
+  maskedPhone,
+  onConfirm,
+  onCancel,
+}: {
+  mode: "enable" | "disable";
+  maskedPhone: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const [step,    setStep]    = useState<"phone" | "otp" | "password">(
+    mode === "enable" ? "phone" : "password",
+  );
+  const [otp,     setOtp]     = useState("");
+  const [devOtp,  setDevOtp]  = useState("");
+  const [password, setPassword] = useState("");
+  const [error,   setError]   = useState("");
+  const [sending, setSending] = useState(false);
+
+  function handleSendCode() {
+    setSending(true);
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setDevOtp(code);
+    setTimeout(() => {
+      setSending(false);
+      setStep("otp");
+    }, 700);
+  }
+
+  function handleConfirm() {
+    if (step === "otp") {
+      if (otp.trim().length !== 6) { setError("Enter the 6-digit code."); return; }
+    }
+    if (step === "password") {
+      if (!password.trim()) { setError("Please enter your current password."); return; }
+    }
+    setError("");
+    onConfirm();
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-t-[28px] bg-[var(--surface-card)] border border-[var(--border-subtle)] sm:rounded-[28px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-[var(--border-subtle)]" />
+        <div className="p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-[#E8F5F2]">
+              <Shield className="h-6 w-6 text-emerald-700" strokeWidth={1.85} />
+            </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Close dialog"
+              className="mt-1 rounded-full p-1 text-[var(--color-secondary)] hover:bg-[var(--surface-card)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Enable — step 1: confirm phone & send code */}
+          {mode === "enable" && step === "phone" && (
+            <>
+              <h2 className="text-[18px] font-bold text-[var(--text-primary)]">
+                Enable two-factor authentication
+              </h2>
+              <p className="mt-1.5 text-[13px] leading-5 text-[var(--color-secondary)]">
+                We will send a test code to your registered number to confirm your phone is reachable.
+              </p>
+              <div className="mt-4 rounded-[14px] bg-[var(--surface-card)] px-4 py-3.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-secondary)]">Phone number</p>
+                <p className="mt-1 text-[15px] font-bold text-[var(--text-primary)]">{maskedPhone}</p>
+              </div>
+              <p className="mt-3 text-[11px] leading-5 text-[var(--color-secondary)]">
+                Not your number? Update it in <strong>Account &rarr; Phone number</strong> first.
+              </p>
+              <div className="mt-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendCode}
+                  disabled={sending}
+                  className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {sending ? "Sending…" : "Send test code"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Enable — step 2: enter OTP */}
+          {mode === "enable" && step === "otp" && (
+            <>
+              <h2 className="text-[18px] font-bold text-[var(--text-primary)]">
+                Enter the code
+              </h2>
+              <p className="mt-1.5 text-[13px] leading-5 text-[var(--color-secondary)]">
+                Enter the 6-digit code we sent to {maskedPhone}.
+              </p>
+              <div className="mt-5 space-y-4">
+                {IS_DEV && devOtp && <DevOtpBanner otp={devOtp} />}
+                <OtpBoxes value={otp} onChange={(v) => { setOtp(v); setError(""); }} />
+                {error && (
+                  <p className="flex items-center gap-1.5 text-[12px] text-red-500">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    {error}
+                  </p>
+                )}
+              </div>
+              <div className="mt-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setStep("phone"); setOtp(""); setError(""); }}
+                  className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirm}
+                  disabled={otp.trim().length !== 6}
+                  className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110 disabled:opacity-40"
+                >
+                  Enable 2FA
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Disable — enter password */}
+          {mode === "disable" && step === "password" && (
+            <>
+              <h2 className="text-[18px] font-bold text-[var(--text-primary)]">
+                Disable two-factor authentication
+              </h2>
+              <p className="mt-1.5 text-[13px] leading-5 text-[var(--color-secondary)]">
+                Enter your current password to disable 2FA. Your account will be less secure without it.
+              </p>
+              <div className="mt-4 rounded-[12px] bg-amber-500/10 border border-amber-500/20 px-4 py-3">
+                <p className="text-[11px] leading-5 text-amber-700 ">
+                  We recommend keeping 2FA enabled to protect your account and bookings.
+                </p>
+              </div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                placeholder="Current password"
+                className="mt-4 w-full rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-[14px] text-[var(--text-primary)] outline-none focus:border-[var(--color-ink)] transition"
+              />
+              {error && (
+                <p className="mt-2 flex items-center gap-1.5 text-[12px] text-red-500">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  {error}
+                </p>
+              )}
+              <div className="mt-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirm}
+                  className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110"
+                >
+                  Disable 2FA
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Age verification modal ───────────────────────────────────────────────────
+
+function AgeVerifyModal({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: (dob: string) => void;
+  onCancel: () => void;
+}) {
+  const [dob, setDob] = useState("");
+  const [error, setError] = useState("");
+
+  function verify() {
+    if (!dob) { setError("Please enter your date of birth."); return; }
+    const birth = new Date(dob);
+    const today = new Date();
+    const age =
+      today.getFullYear() -
+      birth.getFullYear() -
+      (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+    if (isNaN(age) || age < 18) {
+      setError("You must be 18 or older to view adult products.");
+      return;
+    }
+    setError("");
+    onConfirm(dob);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-t-[28px] bg-[var(--surface-card)] border border-[var(--border-subtle)] sm:rounded-[28px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-[var(--border-subtle)]" />
+        <div className="p-6">
+          <div className="mb-5 flex items-start justify-between gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-[var(--surface-elevated)]">
+              <ShieldCheck className="h-6 w-6 text-[var(--color-action-primary)]" strokeWidth={1.85} />
+            </div>
+            <button type="button" onClick={onCancel} aria-label="Close dialog" className="mt-1 rounded-full p-1 text-[var(--color-secondary)] hover:bg-[var(--surface-elevated)]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <h2 className="text-[18px] font-bold text-[var(--text-primary)]">Confirm your age</h2>
+          <p className="mt-1.5 text-[13px] leading-5 text-[var(--color-secondary)]">
+            Adult products on Counter are intended for people aged 18 and above only.
+          </p>
+          <div className="mt-5">
+            <label htmlFor="age-confirm-dob" className="mb-1.5 block text-[12px] font-semibold text-[var(--text-primary)]">
+              Date of birth
+            </label>
+            <input
+              id="age-confirm-dob"
+              type="date"
+              value={dob}
+              onChange={(e) => { setDob(e.target.value); setError(""); }}
+              max={new Date(new Date().setFullYear(new Date().getFullYear() - 18))
+                .toISOString()
+                .split("T")[0]}
+              className="w-full rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-[14px] text-[var(--text-primary)] outline-none focus:border-[var(--color-ink)] transition"
+            />
+            {error && (
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-red-500">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {error}
+              </p>
+            )}
+          </div>
+          <div className="mt-2 rounded-[12px] bg-amber-500/10 border border-amber-500/20 px-4 py-3">
+            <p className="text-[11px] leading-5 text-amber-700 ">
+              <strong>For adults aged 18+ only.</strong> This preference is stored on this device only.
+            </p>
+          </div>
+          <div className="mt-5 flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={verify}
+              className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110"
+            >
+              Confirm age
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sign-out confirmation ────────────────────────────────────────────────────
+
+function SignOutConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-6"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-[24px] bg-[var(--surface-card)] border border-[var(--border-subtle)] p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-[16px] font-bold text-[var(--text-primary)]">Sign out?</h3>
+        <p className="mt-1.5 text-[13px] text-[var(--color-secondary)]">
+          You can sign back in anytime. Your data stays safe.
+        </p>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+          >
+            Stay
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 rounded-full bg-red-600 py-3 text-[13px] font-bold text-white"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Clear cache confirm modal ────────────────────────────────────────────────
+
+function ClearCacheConfirmModal({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-6"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-[24px] bg-[var(--surface-card)] border border-[var(--border-subtle)] p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[14px] bg-[var(--surface-elevated)]">
+          <Trash2 className="h-6 w-6 text-[var(--color-secondary)]" strokeWidth={1.85} />
+        </div>
+        <h3 className="text-[16px] font-bold text-[var(--text-primary)]">Clear cached data?</h3>
+        <p className="mt-2 text-[13px] leading-5 text-[var(--color-secondary)]">
+          This removes temporary files — draft previews, image cache, and non-essential app data. Your account, posts, bookings, and messages are not affected.
+        </p>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110"
+          >
+            Clear cache
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Download data confirm modal ──────────────────────────────────────────────
+
+function DownloadDataConfirmModal({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-6"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-[24px] bg-[var(--surface-card)] border border-[var(--border-subtle)] p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[14px] bg-[var(--surface-elevated)]">
+          <Download className="h-6 w-6 text-[var(--color-action-primary)]" strokeWidth={1.85} />
+        </div>
+        <h3 className="text-[16px] font-bold text-[var(--text-primary)]">Download your data</h3>
+        <p className="mt-2 text-[13px] leading-5 text-[var(--color-secondary)]">
+          Downloads a JSON copy of the data Styld stores on this device, including your
+          preferences and saved activity.
+        </p>
+        <p className="mt-2 text-[11px] text-[var(--color-secondary)]">
+          Data held on Styld&apos;s servers is not included yet. A full server-side export is
+          planned for a later release.
+        </p>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110"
+          >
+            Download file
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Report a problem modal ───────────────────────────────────────────────────
+
+function ReportProblemModal({ onClose }: { onClose: () => void }) {
+  const [category,    setCategory]    = useState("");
+  const [description, setDescription] = useState("");
+  const [screenshot,  setScreenshot]  = useState<string | null>(null);
+  const [submitted,   setSubmitted]   = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error,       setError]       = useState("");
+
+  const MIN_CHARS = 20;
+  const MAX_CHARS = 500;
+  const tooShort  = description.trim().length < MIN_CHARS;
+  const atLimit   = description.length >= MAX_CHARS - 10;
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setScreenshot(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  async function handleSubmit() {
+    if (!category || tooShort || isSubmitting) return;
+    setIsSubmitting(true);
+
+    const nowIso = new Date().toISOString();
+    const session = readAppSession();
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: getDisplayName(session) || "Styld User",
+          email: (session as { email?: string })?.email || "support@styld.app",
+          subject: `[${category.toUpperCase()}] Support Report`,
+          message: screenshot ? `${description.trim()}\n\n[Screenshot attached: ${screenshot.slice(0, 100)}...]` : description.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(
+          typeof data?.error === "string" && data.error
+            ? data.error
+            : "We could not send your report. Please try again."
+        );
+        setIsSubmitting(false);
+        return;
+      }
+    } catch {
+      setError("We could not reach Styld. Check your connection and try again.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    try {
+      const existing = JSON.parse(localStorage.getItem("ms_support_reports") ?? "[]") as unknown[];
+      existing.push({
+        id: `rep_${Date.now()}`,
+        category,
+        description: description.trim(),
+        screenshotAttached: !!screenshot,
+        submittedAt: nowIso,
+      });
+      localStorage.setItem("ms_support_reports", JSON.stringify(existing));
+    } catch { /* noop */ }
+
+    setIsSubmitting(false);
+    setSubmitted(true);
+  }
+
+  if (submitted) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+        onClick={onClose}
+      >
+        <div
+          className="w-full max-w-sm overflow-hidden rounded-t-[28px] bg-[var(--surface-card)] border border-[var(--border-subtle)] sm:rounded-[28px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-[var(--border-subtle)]" />
+          <div className="p-6 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
+              <Check className="h-7 w-7 text-emerald-600" strokeWidth={2.5} />
+            </div>
+            <h2 className="text-[18px] font-bold text-[var(--text-primary)]">Report received</h2>
+            <p className="mt-2 text-[13px] leading-5 text-[var(--color-secondary)]">
+              Thank you for letting us know. Our team will review your report and follow up if needed.
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-5 w-full rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-t-[28px] bg-[var(--surface-card)] border border-[var(--border-subtle)] sm:rounded-[28px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-[var(--border-subtle)]" />
+        <div className="p-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-[14px] bg-[var(--surface-elevated)]">
+              <AlertTriangle className="h-6 w-6 text-[var(--color-action-primary)]" strokeWidth={1.85} />
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close dialog"
+              className="mt-1 rounded-full p-1 text-[var(--color-secondary)] hover:bg-[var(--surface-card)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <h2 className="text-[18px] font-bold text-[var(--text-primary)]">Report a problem</h2>
+          <p className="mt-1 text-[13px] text-[var(--color-secondary)]">
+            Tell us what isn&apos;t working. We read every report.
+          </p>
+
+          <div className="mt-4 space-y-3">
+            {/* Category */}
+            <div>
+              <label htmlFor="report-category" className="mb-1.5 block text-[12px] font-semibold text-[var(--text-primary)]">
+                Category
+              </label>
+              <select
+                id="report-category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-[14px] text-[var(--text-primary)] outline-none focus:border-[var(--color-ink)] transition"
+              >
+                <option value="">Select a category…</option>
+                <option value="bug">App bug or crash</option>
+                <option value="payment">Payment issue</option>
+                <option value="booking">Booking problem</option>
+                <option value="content">Inappropriate content</option>
+                <option value="account">Account problem</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-semibold text-[var(--text-primary)]">
+                Description
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value.slice(0, MAX_CHARS))}
+                rows={4}
+                placeholder="Describe the problem in as much detail as possible…"
+                className="w-full resize-none rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-[14px] leading-6 text-[var(--text-primary)] outline-none placeholder:text-[var(--border-subtle)] focus:border-[var(--color-ink)] transition"
+              />
+              <p className={cn(
+                "mt-1 text-right text-[11px]",
+                atLimit ? "text-red-500" : "text-[var(--color-secondary)]",
+              )}>
+                {description.length} / {MAX_CHARS}
+                {tooShort && description.length > 0 && ` (min ${MIN_CHARS})`}
+              </p>
+            </div>
+
+            {/* Screenshot */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-semibold text-[var(--text-primary)]">
+                Screenshot <span className="font-normal text-[var(--color-secondary)]">(optional)</span>
+              </label>
+              {screenshot ? (
+                <div className="relative overflow-hidden rounded-[14px] border border-[var(--border-subtle)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={screenshot} alt="Screenshot preview" className="max-h-40 w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setScreenshot(null)}
+                    aria-label="Remove screenshot"
+                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer items-center gap-2.5 rounded-[14px] border-2 border-dashed border-[var(--border-subtle)] px-4 py-4 text-[13px] text-[var(--color-secondary)] transition hover:border-[var(--color-ink)] hover:text-[var(--text-primary)]">
+                  <Upload className="h-5 w-5 shrink-0" strokeWidth={1.85} />
+                  <span>Attach a screenshot</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <p
+              role="alert"
+              className="mt-3 rounded-[12px] border border-red-300/60 bg-red-50 px-3 py-2.5 text-[12px] leading-5 text-red-700   "
+            >
+              {error}
+            </p>
+          )}
+
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!category || tooShort || isSubmitting}
+              className="flex-1 rounded-full bg-[var(--color-action-primary)] py-3 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110 disabled:opacity-40 flex items-center justify-center gap-1.5"
+            >
+              {isSubmitting ? "Submitting…" : "Submit report"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2800);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return (
+    <div className="fixed bottom-24 left-1/2 z-[60] -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--color-ink)] px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_8px_24px_rgba(13,27,42,0.28)]">
+      {msg}
+    </div>
+  );
+}
+
+// ─── Delete account modal ─────────────────────────────────────────────────────
+
+function DeleteAccountModal({ onCancel }: { onCancel: () => void }) {
+  const [step,    setStep]    = useState<"warn" | "confirm">("warn");
+  const [typed,   setTyped]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState("");
+  const canConfirm = typed === "DELETE";
+  const clerk = useClerk();
+
+  const gracePeriodDate = new Date();
+  gracePeriodDate.setDate(gracePeriodDate.getDate() + 30);
+  const gracePeriodStr = gracePeriodDate.toLocaleDateString("en-KE", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
+  // Server-authoritative: the deletion request is written to the database
+  // (deletion_status='pending', 30-day grace) before the local session is
+  // cleared. Failure keeps the user signed in with a clear error - no fake
+  // success, and no destructive action on an unconfirmed server state.
+  async function handleDelete() {
+    if (!canConfirm || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/account/deletion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "request" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "We could not schedule the deletion. Please try again.");
+      }
+      // Sign this device out of both auth layers before leaving Settings, so
+      // "signs out immediately" is true. Other legacy sessions were already
+      // invalidated server-side when the deletion was requested.
+      try {
+        if (clerk.loaded) await clerk.signOut();
+      } catch { /* noop */ }
+      await fetch("/api/auth/signout", { method: "POST" }).catch(() => null);
+      clearAppSession();
+      window.location.replace("/");
+    } catch (err: any) {
+      setError(err?.message || "We could not schedule the deletion. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-6"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-[24px] bg-[var(--surface-card)] border border-[var(--border-subtle)] p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Step 1: Red warning */}
+        {step === "warn" && (
+          <>
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[14px] bg-red-500/15">
+              <UserX className="h-6 w-6 text-red-500 " strokeWidth={1.85} />
+            </div>
+            <h3 className="text-[16px] font-bold text-[var(--text-primary)]">Are you sure?</h3>
+            <p className="mt-2 text-[13px] leading-5 text-[var(--color-secondary)]">
+              Deleting your account schedules permanent deactivation after a 30-day grace period.
+            </p>
+            <div className="mt-3 rounded-[12px] bg-red-500/10 border border-red-500/20 px-4 py-3">
+              <p className="text-[12px] font-bold text-red-600 ">You can undo this for 30 days.</p>
+              <ul className="mt-1.5 space-y-1 text-[11px] leading-5 text-red-700 ">
+                <li>This device signs out immediately</li>
+                <li>Sign back in before <strong>{gracePeriodStr}</strong> and cancel from Settings</li>
+                <li>After <strong>{gracePeriodStr}</strong> sign-in is permanently blocked</li>
+              </ul>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep("confirm")}
+                className="flex-1 rounded-full bg-red-600 py-3 text-[13px] font-bold text-white transition hover:brightness-110"
+              >
+                Continue
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Step 2: Type DELETE */}
+        {step === "confirm" && (
+          <>
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-[14px] bg-red-50">
+              <UserX className="h-6 w-6 text-red-500" strokeWidth={1.85} />
+            </div>
+            <h3 className="text-[16px] font-bold text-[var(--text-primary)]">Delete account</h3>
+            <p className="mt-2 text-[13px] leading-5 text-[var(--color-secondary)]">
+              Type <span className="font-mono font-bold text-red-500">DELETE</span> to confirm. Your account enters a 30-day grace period during which you can cancel.
+            </p>
+            <div className="mt-4">
+              <input
+                type="text"
+                value={typed}
+                onChange={(e) => { setTyped(e.target.value); setError(""); }}
+                placeholder="DELETE"
+                className="w-full rounded-[14px] border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-[14px] font-semibold tracking-widest text-[var(--text-primary)] outline-none focus:border-red-400 transition"
+              />
+              {error && (
+                <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-5 text-red-600 ">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {error}
+                </p>
+              )}
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setStep("warn")}
+                className="flex-1 rounded-full border border-[var(--border-subtle)] py-3 text-[13px] font-semibold text-[var(--text-primary)]"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={!canConfirm || loading}
+                className="flex-1 rounded-full bg-red-600 py-3 text-[13px] font-bold text-white transition hover:brightness-110 disabled:opacity-40"
+              >
+                {loading ? "Deleting…" : "Delete account"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main SettingsUI ──────────────────────────────────────────────────────────
+
+export function SettingsUI() {
+  const [settings,         setSettings]         = useState<AppSettings>(readSettings);
+  const [session,          setSession]          = useState<AppUserSession | null>(null);
+  const [langPref,         setLangPref]         = useState<LangPref>({ code: "en", label: "English", dir: "ltr" });
+  const [showAgeModal,     setShowAgeModal]      = useState(false);
+  const [showSignOut,      setShowSignOut]       = useState(false);
+  const [showDelete,       setShowDelete]        = useState(false);
+  const [showLanguage,     setShowLanguage]      = useState(false);
+  const [showTwoFactor,    setShowTwoFactor]     = useState(false);
+  const [twoFactorAction,  setTwoFactorAction]   = useState<"enable" | "disable">("enable");
+  const [showReportModal,  setShowReportModal]   = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [showClearCache,   setShowClearCache]    = useState(false);
+  const [showDownloadData, setShowDownloadData]  = useState(false);
+  const [showPhoneChange,  setShowPhoneChange]   = useState(false);
+  const [storageUsed,      setStorageUsed]       = useState("< 1 KB");
+  const [toast,            setToast]             = useState<string | null>(null);
+  const [deletionScheduledFor, setDeletionScheduledFor] = useState<string | null>(null);
+
+  // Clerk identity (canonical auth). Used to terminate the Clerk session on
+  // sign-out so the legacy bridge and Clerk cannot disagree about state.
+  const clerk = useClerk();
+
+  const showToast = useCallback((msg: string) => setToast(msg), []);
+
+  // Server-authoritative deletion status: drives the Settings banner whose
+  // cancel button maps to POST /api/account/deletion { action: 'cancel' }.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/account/deletion", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d?.ok && d?.status === "pending" && d?.scheduledFor) {
+          setDeletionScheduledFor(d.scheduledFor);
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  async function handleCancelDeletion() {
+    try {
+      const res = await fetch("/api/account/deletion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Could not cancel the deletion.");
+      setDeletionScheduledFor(null);
+      showToast("Account deletion cancelled.");
+    } catch (err: any) {
+      showToast(err?.message || "Could not cancel the deletion.");
+    }
+  }
+
+  // ── Sync settings + session ────────────────────────────────────────────────
+  useEffect(() => {
+    function sync() {
+      setSettings(readSettings());
+      setSession(readAppSession());
+    }
+    sync();
+    window.addEventListener(SETTINGS_CHANGE_EVENT, sync);
+    window.addEventListener(APP_SESSION_EVENT,      sync);
+    window.addEventListener("storage",              sync);
+    return () => {
+      window.removeEventListener(SETTINGS_CHANGE_EVENT, sync);
+      window.removeEventListener(APP_SESSION_EVENT,      sync);
+      window.removeEventListener("storage",              sync);
+    };
+  }, []);
+
+  // ── Apply CSS side effects ─────────────────────────────────────────────────
+  useEffect(() => {
+    applySettings(settings);
+  }, [settings]);
+
+  // ── Apply saved language pref on mount ─────────────────────────────────────
+  useEffect(() => {
+    const pref = readLangPref();
+    setTimeout(() => {
+      setLangPref(pref);
+      setStorageUsed(calcStorageUsed());
+    }, 0);
+    document.documentElement.lang = pref.code;
+    document.documentElement.dir  = pref.dir;
+  }, []);
+
+  const isGuest    = !session || session.role === "guest";
+  const isProvider = session?.role === "professional" || session?.role === "salon";
+  const sessionPhone = isGuest ? "" : (session as { phone?: string }).phone ?? "";
+
+  function patch<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
+    setSettings(setSetting(key, value));
+  }
+
+  function handleAdultToggle(on: boolean) {
+    if (!on) { setSettings(writeSettings({ showAdultProducts: false })); return; }
+    if (settings.adultProductsAgeVerified) {
+      setSettings(writeSettings({ showAdultProducts: true }));
+    } else {
+      setShowAgeModal(true);
+    }
+  }
+
+  function handleAgeConfirmed(dob: string) {
+    setSettings(writeSettings({ showAdultProducts: true, adultProductsAgeVerified: true, adultProductsVerifiedAt: new Date().toISOString(), adultProductsDOB: dob }));
+    setShowAgeModal(false);
+    showToast("Adult products enabled");
+  }
+
+  // This function runs when the user clicks "Sign Out"
+  async function handleSignOut() {
+    // Clear localStorage session immediately so UI updates
+    clearAppSession();
+    // Terminate the Clerk session as well. With Clerk as the canonical
+    // identity layer, sign-out must clear BOTH providers, otherwise the user
+    // still holds a valid Clerk session after the UI says signed out.
+    try {
+      if (clerk.loaded) await clerk.signOut();
+    } catch {
+      // Clerk not configured (legacy-only deployment): the legacy sign-out
+      // below still fully terminates the legacy session and cookies.
+    }
+    // Clear the server-side httpOnly cookie
+    try {
+      await fetch("/api/auth/signout", { method: "POST" });
+    } catch {
+      // Network error — cookie will expire naturally; user is already logged out locally
+    }
+    
+    // 4. Close the confirmation box
+    setShowSignOut(false);
+    
+    // 5. Force the page to refresh/redirect so they are officially logged out
+    window.location.href = "/";
+  }
+
+  function handleTwoFactorToggle(next: boolean) {
+    setTwoFactorAction(next ? "enable" : "disable");
+    setShowTwoFactor(true);
+  }
+
+  function handleTwoFactorConfirmed() {
+    const enabling = twoFactorAction === "enable";
+    patch("twoFactorEnabled", enabling);
+    setShowTwoFactor(false);
+    showToast(enabling ? "Two-factor authentication enabled" : "Two-factor authentication disabled");
+  }
+
+  function handleClearCacheConfirmed() {
+    const keepKeys = new Set([
+      "ms_app_settings.v1",
+      "mobile-salon.client-session.v1",
+      "ms_social_posts",
+      "ms_bookings",
+      "ms_messages",
+      "ms_social_saves",
+      "ms_social_follows",
+      "ms_team_members.v1",
+    ]);
+    try {
+      const toRemove = Object.keys(localStorage).filter((k) => k.startsWith("ms_") && !keepKeys.has(k));
+      toRemove.forEach((k) => localStorage.removeItem(k));
+    } catch { /* noop */ }
+    setStorageUsed(calcStorageUsed());
+    setShowClearCache(false);
+    showToast("Temporary cache cleared");
+  }
+
+  // Real, truthful export: downloads the data Styld actually stores on this
+  // device. Server-side account data export does not exist yet, so the UI must
+  // never promise a server-generated file or a delivery window.
+  function handleDownloadDataConfirmed() {
+    try {
+      const stored: Record<string, string | null> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        try {
+          stored[key] = localStorage.getItem(key);
+        } catch { /* skip unreadable entry */ }
+      }
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        scope: "Data stored by Styld in this browser only. Server-side data is not included.",
+        account: session
+          ? {
+              displayName: getDisplayName(session),
+              accountType: getAccountLabel(session),
+              phoneMasked: sessionPhone ? maskPhone(sessionPhone) : undefined,
+            }
+          : null,
+        preferences: readSettings(),
+        storedData: stored,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `styld-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setShowDownloadData(false);
+      showToast("Data file downloaded");
+    } catch {
+      showToast("Could not generate the data file. Please try again.");
+    }
+  }
+
+  function handlePhoneSaved(newPhone: string) {
+    if (!session || session.role === "guest") return;
+    const updated = { ...session, phone: newPhone } as AppUserSession;
+    writeAppSession(updated);
+    setShowPhoneChange(false);
+    showToast("Phone number updated");
+  }
+
+  // ── Row definitions ────────────────────────────────────────────────────────
+
+  const accountRows: RowDef[] = [
+    {
+      kind: "link",
+      icon: User,
+      label: "Edit profile",
+      sub: isGuest ? "Sign in to manage your profile" : getDisplayName(session),
+      href: isGuest ? "/auth/sign-in" : "/settings/edit-profile",
+      iconBg: "bg-[#F0EBFF]",
+    },
+    {
+      kind: "link",
+      icon: Phone,
+      label: "Phone number",
+      sub: isGuest ? "—" : (sessionPhone || "Not set"),
+      onClick: isGuest ? undefined : () => setShowPhoneChange(true),
+      href: isGuest ? "/auth/sign-in" : undefined,
+    },
+    {
+      kind: "link",
+      icon: UserCog,
+      label: "Account type",
+      value: isGuest ? "Guest" : getAccountLabel(session),
+      readOnly: true,
+      dim: true,
+    },
+    {
+      kind: "link",
+      icon: Languages,
+      label: "Language",
+      value: langPref.label,
+      onClick: () => setShowLanguage(true),
+    },
+  ];
+
+  // Privacy B1–B4 only for clients
+  const clientPrivacyRows: RowDef[] = session?.role === "client" ? [
+    {
+      kind: "toggle",
+      icon: Lock,
+      label: "Private account",
+      sub: "Saved on this device. Profile privacy is not enforced platform-wide yet.",
+      on: settings.privateAccount,
+      onChange: (v) => patch("privateAccount", v),
+      iconBg: "bg-[#EDF5FF]",
+    },
+    {
+      kind: "toggle",
+      icon: Eye,
+      label: "Activity status",
+      sub: "Saved on this device. Last-active time is not shared with anyone yet.",
+      on: settings.showActivityStatus,
+      onChange: (v) => patch("showActivityStatus", v),
+    },
+    {
+      kind: "toggle",
+      icon: Users,
+      label: "Direct messages",
+      sub: "Saved on this device. Messaging permissions are not enforced platform-wide yet.",
+      on: settings.allowDirectMessages,
+      onChange: (v) => patch("allowDirectMessages", v),
+    },
+    {
+      kind: "select",
+      icon: MessageCircle,
+      label: "Who can comment",
+      sub: "Saved on this device. Comment permissions are not enforced platform-wide yet.",
+      value: settings.whoCanComment,
+      options: [
+        { value: "everyone",  label: "Everyone"  },
+        { value: "followers", label: "Followers" },
+        { value: "nobody",    label: "Nobody"    },
+      ],
+      onChange: (v) => patch("whoCanComment", v as AppSettings["whoCanComment"]),
+    },
+  ] : [];
+
+  const privacyRows: RowDef[] = [
+    ...clientPrivacyRows,
+    {
+      kind: "link",
+      icon: UserX,
+      label: "Blocked accounts",
+      sub: "Manage your blocked list. Enforcement across profiles is not active yet",
+      href: "/settings/blocked-accounts",
+    },
+    {
+      kind: "link",
+      icon: EyeOff,
+      label: "Muted accounts",
+      sub: "Manage your muted list. Feed filtering is not active yet",
+      href: "/settings/muted-accounts",
+    },
+  ];
+
+  const notificationRows: RowDef[] = [
+    {
+      kind: "toggle",
+      icon: Bell,
+      label: "Push notifications",
+      sub: "Saved on this device. Push, email and SMS delivery is not connected yet, so no notifications are sent today.",
+      on: settings.pushNotifications,
+      onChange: (v) => patch("pushNotifications", v),
+      iconBg: "bg-[#FEF0F3]",
+    },
+    {
+      kind: "toggle",
+      icon: Sparkles,
+      label: "Likes",
+      sub: "When someone likes your post",
+      on: settings.notifyLikes,
+      onChange: (v) => patch("notifyLikes", v),
+      disabled: !settings.pushNotifications,
+    },
+    {
+      kind: "toggle",
+      icon: MessageCircle,
+      label: "Comments",
+      sub: "When someone comments on your post",
+      on: settings.notifyComments,
+      onChange: (v) => patch("notifyComments", v),
+      disabled: !settings.pushNotifications,
+    },
+    {
+      kind: "toggle",
+      icon: Users,
+      label: "New followers",
+      sub: "When someone follows you",
+      on: settings.notifyFollowers,
+      onChange: (v) => patch("notifyFollowers", v),
+      disabled: !settings.pushNotifications,
+    },
+    {
+      kind: "toggle",
+      icon: Repeat2,
+      label: "Reposts",
+      sub: "When someone reposts your content",
+      on: settings.notifyReposts,
+      onChange: (v) => patch("notifyReposts", v),
+      disabled: !settings.pushNotifications,
+    },
+    {
+      kind: "toggle",
+      icon: MessageCircle,
+      label: "Messages",
+      sub: "New direct messages",
+      on: settings.notifyMessages,
+      onChange: (v) => patch("notifyMessages", v),
+      disabled: !settings.pushNotifications,
+    },
+    {
+      kind: "toggle",
+      icon: Package,
+      label: isProvider ? "New booking alerts" : "Booking reminders",
+      sub: isProvider ? "Incoming booking requests from clients" : "Upcoming appointment alerts",
+      on: settings.notifyBookings,
+      onChange: (v) => patch("notifyBookings", v),
+      disabled: !settings.pushNotifications,
+    },
+    ...(!isProvider ? [{
+      kind: "toggle" as const,
+      icon: ShoppingBag,
+      label: "Offers & promotions",
+      sub: "Deals from salons and pros you follow",
+      on: settings.notifyOffers,
+      onChange: (v: boolean) => patch("notifyOffers", v),
+      disabled: !settings.pushNotifications,
+    }] : []),
+    {
+      kind: "toggle",
+      icon: Bell,
+      label: "Platform announcements",
+      sub: "Updates from the Styld team",
+      on: settings.notifyAnnouncements,
+      onChange: (v) => patch("notifyAnnouncements", v),
+      disabled: !settings.pushNotifications,
+    },
+  ];
+
+  const counterRows: RowDef[] = [
+    {
+      kind: "toggle",
+      icon: settings.showAdultProducts ? ShieldCheck : ShieldOff,
+      label: "18+ products",
+      sub: settings.showAdultProducts
+        ? "Adult products are visible. Tap to disable."
+        : "Hidden by default. Tap to enable with age verification.",
+      on: settings.showAdultProducts,
+      onChange: handleAdultToggle,
+      iconBg: settings.showAdultProducts ? "bg-amber-50" : "bg-[var(--surface-card)]",
+    },
+    {
+      kind: "toggle",
+      icon: Sparkles,
+      label: "Product suggestions",
+      sub: "Show personalised product picks based on your services",
+      on: settings.showProductSuggestions,
+      onChange: (v) => patch("showProductSuggestions", v),
+    },
+    {
+      kind: "link",
+      icon: ShoppingBag,
+      label: "Order history",
+      sub: "View your past Counter purchases",
+      href: "/counter/cart",
+    },
+  ];
+
+  const feedRows: RowDef[] = [
+    {
+      kind: "toggle",
+      icon: Repeat2,
+      label: "Show reposts in feed",
+      sub: "Saved on this device. Feed filtering is not applied yet",
+      on: settings.showReposts,
+      onChange: (v) => patch("showReposts", v),
+    },
+    {
+      kind: "toggle",
+      icon: Sparkles,
+      label: "Suggested posts",
+      sub: "Saved on this device. Feed suggestions are not personalised yet",
+      on: settings.showSuggestedPosts,
+      onChange: (v) => patch("showSuggestedPosts", v),
+    },
+    {
+      kind: "toggle",
+      icon: Volume2,
+      label: "Autoplay videos",
+      sub: "Saved on this device. Video playback is not affected yet",
+      on: settings.autoplayVideos,
+      onChange: (v) => patch("autoplayVideos", v),
+    },
+  ];
+
+  // Styld is LIGHT MODE ONLY: there is no Appearance/theme section and no
+  // color-scheme control. Text size is a display-accessibility setting, so it
+  // lives under Accessibility.
+  const accessibilityRows: RowDef[] = [
+    {
+      kind: "select",
+      icon: Type,
+      label: "Text size",
+      sub: "Adjust how large text appears throughout the app",
+      value: settings.textSize,
+      options: [
+        { value: "small",  label: "S" },
+        { value: "medium", label: "M" },
+        { value: "large",  label: "L" },
+      ],
+      onChange: (v) => patch("textSize", v as AppSettings["textSize"]),
+    },
+    {
+      kind: "toggle",
+      icon: Zap,
+      label: "Reduce motion",
+      sub: "Minimise animations and transitions throughout the app",
+      on: settings.reduceMotion,
+      onChange: (v) => patch("reduceMotion", v),
+    },
+    {
+      kind: "toggle",
+      icon: Monitor,
+      label: "High contrast",
+      sub: "Increase contrast for better readability",
+      on: settings.highContrast,
+      onChange: (v) => patch("highContrast", v),
+    },
+  ];
+
+  const securityRows: RowDef[] = [
+    {
+      kind: "toggle",
+      icon: Shield,
+      label: "Two-factor authentication",
+      sub: "Additional two-factor protection is not connected yet. WhatsApp sign-in alone is not two-factor authentication.",
+      on: false,
+      disabled: true,
+      onChange: () => {},
+      iconBg: "bg-[#E8F5F2]",
+    },
+    {
+      kind: "toggle",
+      icon: Bell,
+      label: "Login alerts",
+      sub: "Automatic login alerts are not connected yet. Review active sessions below.",
+      on: false,
+      disabled: true,
+      onChange: () => {},
+    },
+    {
+      kind: "link",
+      icon: Smartphone,
+      label: "Active sessions",
+      sub: "See all devices where you are signed in",
+      href: "/settings/active-sessions",
+    },
+    {
+      kind: "link",
+      icon: Lock,
+      label: "Change password",
+      href: "/settings/change-password",
+    },
+  ];
+
+  const storageRows: RowDef[] = [
+    {
+      kind: "link",
+      icon: Trash2,
+      label: "Clear cache",
+      sub: "Remove temporary data to free up space",
+      onClick: () => setShowClearCache(true),
+    },
+    {
+      kind: "link",
+      icon: Download,
+      label: "Download your data",
+      sub: "Download a copy of the data stored on this device",
+      onClick: () => setShowDownloadData(true),
+    },
+    {
+      kind: "link",
+      icon: Database,
+      label: "Storage used",
+      value: storageUsed,
+      readOnly: true,
+    },
+    {
+      kind: "link",
+      icon: WifiOff,
+      label: "Offline mode",
+      sub: "Coming soon",
+      readOnly: true,
+    },
+  ];
+
+  const supportRows: RowDef[] = [
+    {
+      kind: "link",
+      icon: HelpCircle,
+      label: "Help center",
+      href: "/help",
+      iconBg: "bg-[#EDF5FF]",
+    },
+    {
+      kind: "link",
+      icon: Sparkles,
+      label: "Take Styld tour",
+      sub: "Replay the interactive guided walkthrough",
+      onClick: () => {
+        restartOnboardingTour();
+      },
+      iconBg: "bg-[#F7F3EE]",
+    },
+    {
+      kind: "link",
+      icon: AlertTriangle,
+      label: "Report a problem",
+      sub: "Tell us if something isn't working",
+      onClick: () => setShowReportModal(true),
+    },
+    {
+      kind: "link",
+      icon: MessageSquare,
+      label: "Provide feedback",
+      sub: "Share issues, feature requests, or general thoughts",
+      onClick: () => setShowFeedbackModal(true),
+    },
+    {
+      kind: "link",
+      icon: Shield,
+      label: "Safety information",
+      sub: "Our commitment to your safety on Styld",
+      href: "/safety",
+    },
+    {
+      kind: "link",
+      icon: BookOpen,
+      label: "Community guidelines",
+      href: "/community-guidelines",
+    },
+  ];
+
+  const aboutRows: RowDef[] = [
+    {
+      kind: "link",
+      icon: Info,
+      label: "About Styld",
+      value: process.env.NEXT_PUBLIC_APP_VERSION ?? "v0.1.0",
+      href: "/about",
+      iconBg: "bg-[#F0EBFF]",
+    },
+    {
+      kind: "link",
+      icon: FileText,
+      label: "Terms of service",
+      href: "/terms",
+    },
+    {
+      kind: "link",
+      icon: Lock,
+      label: "Privacy policy",
+      href: "/privacy",
+    },
+    {
+      kind: "link",
+      icon: LayoutGrid,
+      label: "Open-source licenses",
+      href: "/licenses",
+    },
+  ];
+
+  const dangerRows: RowDef[] = [
+    {
+      kind: "link",
+      icon: LogOut,
+      label: "Sign out",
+      onClick: () => setShowSignOut(true),
+      danger: true,
+    },
+    {
+      kind: "link",
+      icon: UserX,
+      label: "Delete account",
+      sub: "Signs you out; deletion completes after a 30-day grace period",
+      onClick: () => setShowDelete(true),
+      danger: true,
+    },
+  ];
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6 pb-28 pt-2">
+
+      {deletionScheduledFor && !isGuest && (
+        <div role="alert" className="rounded-[18px] border border-amber-500/40 bg-amber-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 " strokeWidth={1.85} />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-bold text-amber-800 ">
+                Account deletion scheduled
+              </p>
+              <p className="mt-1 text-[12px] leading-5 text-amber-700 ">
+                Your account is scheduled for deletion on{" "}
+                {new Date(deletionScheduledFor).toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" })}.
+                Cancel now to keep your account. After that date, sign-in is permanently blocked.
+              </p>
+              <button
+                type="button"
+                onClick={handleCancelDeletion}
+                className="mt-3 rounded-full border border-amber-500/50 px-4 py-2 text-[12px] font-bold text-amber-800  transition hover:bg-amber-500/15"
+              >
+                Cancel deletion
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account card */}
+      {!isGuest && session && (
+        <Link
+          href="/settings/edit-profile"
+          className="flex items-center gap-4 rounded-[22px] bg-[linear-gradient(135deg,#1D1D1B,#2D2824)] px-5 py-5 text-white shadow-[0_6px_28px_rgba(29,29,27,0.18)] transition hover:brightness-105"
+        >
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/20 text-2xl font-bold text-white">
+            {getDisplayName(session)[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[16px] font-bold">{getDisplayName(session)}</p>
+            <p className="text-[12px] text-white/70">{getAccountLabel(session)}</p>
+          </div>
+          <ChevronRight className="h-5 w-5 text-white/60" />
+        </Link>
+      )}
+
+      {isGuest && (
+        <Link
+          href="/auth/sign-in"
+          className="flex items-center gap-4 rounded-[22px] border border-[var(--border-subtle)] bg-[var(--surface-card)] px-5 py-5 shadow-[0_1px_6px_rgba(13,27,42,0.06)] transition hover:shadow-[0_4px_16px_rgba(13,27,42,0.1)]"
+        >
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--surface-elevated)]">
+            <User className="h-7 w-7 text-[var(--color-secondary)]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[15px] font-bold text-[var(--text-primary)]">Sign in to your account</p>
+            <p className="text-[12px] text-[var(--color-secondary)]">Access all settings and personalise your experience</p>
+          </div>
+          <ChevronRight className="h-5 w-5 text-[var(--border-subtle)]" />
+        </Link>
+      )}
+
+      <Section title="Account"><RowGroup rows={accountRows} /></Section>
+      <Section title="Privacy &amp; Safety"><RowGroup rows={privacyRows} /></Section>
+      <Section title="Notifications"><RowGroup rows={notificationRows} /></Section>
+
+      {FEATURES.SHOP && !isProvider && (
+        <Section title="Counter — Shop">
+          <div className="border-b border-[var(--border-subtle)]/60 px-4 py-4">
+            <div className="flex items-start gap-3 rounded-[14px] bg-amber-500/10 border border-amber-500/20 p-3">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 " strokeWidth={1.85} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[12px] font-bold text-amber-800 ">18+ products hidden by default</p>
+                <p className="mt-0.5 text-[11px] leading-4 text-amber-700 ">
+                  Adult products on Counter are hidden unless you verify your age below. Products are intended for adults aged 18 and above only.
+                </p>
+              </div>
+            </div>
+          </div>
+          <RowGroup rows={counterRows} />
+        </Section>
+      )}
+
+      <Section title="Feed &amp; Content"><RowGroup rows={feedRows} /></Section>
+      <Section title="Accessibility"><RowGroup rows={accessibilityRows} /></Section>
+      <Section title="Security"><RowGroup rows={securityRows} /></Section>
+      <Section title="Data &amp; Storage"><RowGroup rows={storageRows} /></Section>
+      <Section title="Support"><RowGroup rows={supportRows} /></Section>
+      <Section title="About"><RowGroup rows={aboutRows} /></Section>
+
+      <Section title="Account actions">
+        <RowGroup rows={isGuest ? [] : dangerRows} />
+        {isGuest && (
+          <div className="flex flex-col items-center gap-1 px-4 py-5">
+            <p className="text-[13px] text-[var(--color-secondary)]">Not signed in</p>
+            <Link
+              href="/auth/sign-in"
+              className="mt-1 rounded-full bg-[var(--color-action-primary)] px-6 py-2.5 text-[13px] font-bold text-[var(--color-action-primary-text)] transition hover:brightness-110"
+            >
+              Sign in
+            </Link>
+          </div>
+        )}
+      </Section>
+
+      <p className="pb-4 text-center text-[11px] leading-6 text-[var(--text-secondary)]">
+        Styld &middot; Trusted beauty access &middot; Kenya
+        <br />
+        Standardized standard of service
+      </p>
+
+      {/* ── Modals ── */}
+      {showAgeModal && (
+        <AgeVerifyModal onConfirm={handleAgeConfirmed} onCancel={() => setShowAgeModal(false)} />
+      )}
+      {showSignOut && (
+        <SignOutConfirm onConfirm={handleSignOut} onCancel={() => setShowSignOut(false)} />
+      )}
+      {showDelete && (
+        <DeleteAccountModal onCancel={() => setShowDelete(false)} />
+      )}
+      {showLanguage && (
+        <LanguageModal
+          currentCode={langPref.code}
+          onSave={(pref) => setLangPref(pref)}
+          onClose={() => setShowLanguage(false)}
+        />
+      )}
+      {showTwoFactor && (
+        <TwoFactorModal
+          mode={twoFactorAction}
+          maskedPhone={maskPhone(sessionPhone)}
+          onConfirm={handleTwoFactorConfirmed}
+          onCancel={() => setShowTwoFactor(false)}
+        />
+      )}
+      {showReportModal && (
+        <ReportProblemModal onClose={() => setShowReportModal(false)} />
+      )}
+      {showFeedbackModal && (
+        <FeedbackModal
+          onClose={() => setShowFeedbackModal(false)}
+          userEmail={session && "email" in session ? (session as { email?: string }).email : undefined}
+          userName={getDisplayName(session)}
+        />
+      )}
+      {showClearCache && (
+        <ClearCacheConfirmModal
+          onConfirm={handleClearCacheConfirmed}
+          onCancel={() => setShowClearCache(false)}
+        />
+      )}
+      {showDownloadData && (
+        <DownloadDataConfirmModal
+          onConfirm={handleDownloadDataConfirmed}
+          onCancel={() => setShowDownloadData(false)}
+        />
+      )}
+      {showPhoneChange && (
+        <PhoneChangeSheet
+          currentPhone={sessionPhone}
+          onSaved={handlePhoneSaved}
+          onCancel={() => setShowPhoneChange(false)}
+        />
+      )}
+      {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
+    </div>
+  );
+}

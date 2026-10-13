@@ -1,0 +1,88 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
+import { Languages } from "lucide-react";
+
+const languageOptions = [
+  { value: "en-KE", label: "Kenyan English", note: "Default platform wording for Nairobi beauty users." },
+  { value: "sw-KE", label: "Kiswahili", note: "For users who prefer Kiswahili support." },
+  { value: "en", label: "English", note: "A more international English option." },
+  { value: "sheng", label: "Sheng-friendly", note: "A warmer local tone for selected support moments." },
+];
+
+const STORAGE_KEY = "mobile-salon-language-preference";
+const STORAGE_EVENT = "mobile-salon-language-preference-change";
+
+export function LanguagePreferenceCard() {
+  const language = useSyncExternalStore(subscribeToLanguagePreference, getStoredLanguage, getDefaultLanguage);
+
+  const selectedLanguage = languageOptions.find((option) => option.value === language) ?? languageOptions[0];
+
+  function handleLanguageChange(value: string) {
+    window.localStorage.setItem(STORAGE_KEY, value);
+    window.dispatchEvent(new Event(STORAGE_EVENT));
+  }
+
+  return (
+    <section className="beauty-card rounded-[32px] p-6">
+      <div className="flex items-start gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--surface-card)] text-[var(--color-warning)]">
+          <Languages className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs uppercase tracking-[0.22em] text-[var(--color-clay-text)] font-semibold">Language & wording</p>
+          <h2 className="mt-3 text-3xl font-semibold text-[var(--text-primary)]">Default voice: Kenyan English</h2>
+          <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
+            Kenyan English stays the default. Users can switch later.
+          </p>
+          <label className="mt-5 block" htmlFor="language-preference">
+            <span className="text-sm font-semibold text-[var(--text-primary)]">Preferred language</span>
+            <select
+              className="mt-2 w-full rounded-[22px] border border-[var(--input-border)] bg-[var(--input-bg)] px-4 py-3 text-sm font-semibold text-[var(--input-text)] outline-none transition focus:border-[var(--color-clay)]"
+              id="language-preference"
+              onChange={(event) => handleLanguageChange(event.target.value)}
+              value={language}
+            >
+              {languageOptions.map((option) => (
+                <option key={option.value} value={option.value} className="bg-[var(--bg-surface)] text-[var(--text-primary)]">
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-3 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--bg-surface-raised)] px-4 py-3 text-sm leading-6 text-[var(--text-secondary)]">
+            Current: <span className="font-semibold text-[var(--text-primary)]">{selectedLanguage.label}</span>. {selectedLanguage.note}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function getDefaultLanguage() {
+  return "en-KE";
+}
+
+function getStoredLanguage() {
+  if (typeof window === "undefined") {
+    return getDefaultLanguage();
+  }
+
+  const savedLanguage = window.localStorage.getItem(STORAGE_KEY);
+
+  if (savedLanguage && languageOptions.some((option) => option.value === savedLanguage)) {
+    return savedLanguage;
+  }
+
+  return getDefaultLanguage();
+}
+
+function subscribeToLanguagePreference(onStoreChange: () => void) {
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener(STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener(STORAGE_EVENT, onStoreChange);
+  };
+}

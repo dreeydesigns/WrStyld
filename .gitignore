@@ -1,0 +1,40 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+.gradle/
+.vscode/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+*.tsbuildinfo
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+*.zip
+*.tar
+*.gz
+.cache/
+claude/
+.claude/
+.idea/
+
+# Generated verification/build logs and diagnostic dumps (not repository documentation).
+# Narrow patterns only - the repository also contains legitimate .txt assets.
+build-*.out.txt
+build-*.err.txt
+build-current*.txt
+test-*.txt
+*-verify.txt
+*-verify2.txt
+*-diffstat.txt
+leak*.txt
+docdiff*.txt
+docstat.txt
+# Test runs and browser profiles
+screenshots/
+.browser-profile*/

@@ -1,0 +1,85 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+
+import { AppUsageTracker } from "@/components/app-usage-tracker";
+import { SessionHydrator } from "@/components/session-hydrator";
+import { GuestAuthGate } from "@/components/guest-auth-gate";
+import type { NavKey, RoleMode } from "@/lib/site-data";
+import { ClientSessionGate } from "@/components/client-session-gate";
+import { BottomMobileNav, SplitBrandHeader } from "@/components/marketplace-ui";
+import type { AppUserRole } from "@/lib/client-session";
+import { FEATURES } from "@/lib/feature-flags";
+import { OnboardingTour } from "@/components/onboarding-tour";
+
+export function AppShell({
+  children,
+  currentNav,
+  requireSession = false,
+  showBottomNav = true,
+  showFooter = false,
+  allowedRoles,
+  maxWidth = "max-w-7xl",
+}: {
+  children: ReactNode;
+  currentNav: NavKey;
+  roleMode?: RoleMode; // kept for backward-compat but no longer used
+  requireSession?: boolean;
+  showBottomNav?: boolean;
+  showFooter?: boolean;
+  allowedRoles?: AppUserRole[];
+  maxWidth?: string;
+}) {
+  return (
+    <div className="feminine-shell flex min-h-screen w-full max-w-full min-w-0 flex-col bg-[var(--bg-page)] text-[var(--text-primary)]">
+      <OnboardingTour />
+      <AppUsageTracker />
+      {/* Restores localStorage session from httpOnly cookie if storage was cleared */}
+      <SessionHydrator />
+      {/* Guest 10-min timer + booking/checkout gate — renders nothing until triggered */}
+      <GuestAuthGate />
+      <SplitBrandHeader currentNav={currentNav} />
+      
+      <main className={`mx-auto flex w-full max-w-full min-w-0 flex-grow flex-col px-4 pt-6 lg:px-6 ${maxWidth}`}>
+        {requireSession ? (
+          <ClientSessionGate allowedRoles={allowedRoles}>
+            {children}
+          </ClientSessionGate>
+        ) : (
+          children
+        )}
+      </main>
+      
+      {showFooter ? (
+        <footer className="mt-auto border-t border-[var(--border-subtle)] bg-[var(--footer-bg)]">
+          <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-8 text-sm text-[var(--footer-text)] lg:flex-row lg:items-center lg:justify-between lg:px-6">
+            <div>
+              <p className="font-display text-lg font-semibold text-[var(--footer-text)]">Styld</p>
+              <p className="mt-1">The trusted digital beauty economy platform. Booking and commerce, handled beautifully.</p>
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <Link href="/guide" className="hover:text-[var(--color-warning)]">
+                Guide
+              </Link>
+              {FEATURES.SHOP && (
+                <Link href="/counter" className="hover:text-[var(--color-warning)]">
+                  Counter
+                </Link>
+              )}
+              <Link href="/book" className="hover:text-[var(--color-warning)]">
+                Book
+              </Link>
+              <Link href="/terms" className="hover:text-[var(--color-warning)]">
+                Terms & Conditions
+              </Link>
+              <Link href="/help" className="hover:text-[var(--color-warning)]">
+                Help
+              </Link>
+            </div>
+          </div>
+        </footer>
+      ) : null}
+      
+      {showBottomNav ? <BottomMobileNav currentNav={currentNav} /> : null}
+    </div>
+  );
+}

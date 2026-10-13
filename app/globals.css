@@ -1,0 +1,406 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Great+Vibes&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,600;1,700&display=swap");
+@import "tailwindcss";
+
+
+:root {
+  /* Styld is light-only: native controls must never follow OS dark mode. */
+  color-scheme: light;
+
+  /* STYLD LOGO BOOK v2.0 — AUTHORITATIVE PALETTE */
+  /* Core Identity Colors: Deep Ink #1D1D1B, Clay #C0A090, Sage #909888, White #FFFFFF */
+  
+  /* Primary brand colors */
+  --color-ink:       #1D1D1B;
+  --color-clay:      #C0A090;
+  --color-sage:      #909888;
+  --color-white:     #FFFFFF;
+
+  /* Accent & Highlight tokens */
+  --color-accent:    #C0A090;
+  --color-highlight: #C0A090;
+  --color-warning-bg: rgba(201, 168, 76, 0.16);
+  --color-white-bg:   rgba(255, 255, 255, 0.85);
+
+  /* Canonical semantic surfaces — Light Mode (Warm Editorial Canvas) */
+  --bg-page:            #FAF8F5;
+  --bg-canvas:          var(--bg-page);
+  --bg-surface:         #FFFFFF;
+  --bg-surface-raised:  #F4F1EC;
+  --bg-surface-sunken:  #EFECE6;
+  --bg-surface-subtle:  rgba(29, 29, 27, 0.04);
+  --bg-overlay:         rgba(29, 29, 27, 0.78);
+
+  /* Semantic surface aliases */
+  --background:         var(--bg-page);
+  --foreground:         var(--text-primary);
+  --surface-canvas:     var(--bg-page);
+  --surface-card:       var(--bg-surface);
+  --surface-elevated:   var(--bg-surface-raised);
+  --surface-secondary:  var(--bg-surface-raised);
+  --color-bg:                 var(--bg-page);
+  --color-surface:            var(--bg-surface);
+  --color-surface-elevated:   var(--bg-surface-raised);
+  --color-surface-secondary:  var(--bg-surface-raised);
+
+  /* Canonical text hierarchy (WCAG AA / AAA compliant against light surfaces) */
+  --text-primary:       #1D1D1B; /* 16.7:1 contrast on white (AAA) */
+  --text-secondary:     #4F4B48; /* 8.5:1 contrast on white (AAA) */
+  --text-muted:         #6E6966; /* 5.1:1 contrast on white (AA) */
+  --text-disabled:      #A39E9B; /* 3.2:1 for disabled elements */
+  --text-inverse:       #FFFFFF;
+  --text-link:          #875945; /* 4.7:1 AA accessible clay */
+  --color-clay-text:    #875945; /* Darkened clay for accessible text on light bg (4.7:1) */
+
+  /* Semantic text aliases */
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted:     var(--text-muted);
+  --color-text-inverse:   var(--text-inverse);
+
+  /* Canonical Action & Button tokens */
+  --action-primary-bg:          #1D1D1B;
+  --action-primary-text:        #FFFFFF;
+  --action-primary-hover:       #333330;
+  --action-secondary-bg:        #FFFFFF;
+  --action-secondary-text:      #1D1D1B;
+  --action-secondary-hover:     #F4F1EC;
+  --action-ghost-text:          #1D1D1B;
+
+  /* Aliases for backwards compatibility & master directive */
+  --color-primary:              var(--action-primary-bg);
+  --color-primary-hover:        var(--action-primary-hover);
+  --color-secondary:            var(--text-secondary); /* ACCESSIBLE: maps to #4F4B48 (8.5:1 AAA) instead of washed out #C0A090 */
+  --color-secondary-hover:      #333330;
+  --color-action-primary:       var(--action-primary-bg);
+  --color-action-primary-text:  var(--action-primary-text);
+  --color-action-primary-hover: var(--action-primary-hover);
+  --color-action-secondary:     var(--action-secondary-bg);
+  --color-action-secondary-text:var(--action-secondary-text);
+
+  /* State colors */
+  --color-success:    #2E6930;
+  --color-warning:    #B38600;
+  --color-error:      #BA1A1A;
+  --color-info:       var(--color-sage);
+
+  /* Canonical Form input tokens */
+  --input-bg:           #F4F1EC;
+  --input-text:         #1D1D1B;
+  --input-placeholder:  #6E6966; /* 5.1:1 AA contrast on input bg */
+  --input-border:       rgba(29, 29, 27, 0.20);
+  --input-border-focus: var(--color-clay);
+  --color-input-bg:          var(--input-bg);
+  --color-input-text:        var(--input-text);
+  --color-input-placeholder: var(--input-placeholder);
+  --color-input-border:      var(--input-border);
+
+  /* Header surface tokens — Light Mode */
+  --header-bg:             rgba(250, 248, 245, 0.94);
+  --header-text:           #1D1D1B;
+  --header-text-muted:     #4F4B48;
+  --header-border:         rgba(29, 29, 27, 0.12);
+  --header-nav-active-bg:  #1D1D1B;
+  --header-nav-active-text:#FFFFFF;
+  --header-logo-mark:      #1D1D1B;
+  --header-logo-text:      #1D1D1B;
+
+  /* Action disabled tokens — Guaranteed WCAG AA legible (>= 3:1) */
+  --action-disabled-bg:    rgba(29, 29, 27, 0.08);
+  --action-disabled-text:  #7A7571;
+
+  /* Auth surface tokens — Light Mode */
+  --auth-card-bg:          #FFFFFF;
+  --auth-card-border:      rgba(29, 29, 27, 0.12);
+  --auth-heading:          #1D1D1B;
+  --auth-body:             #4F4B48;
+  --auth-label:            #4F4B48;
+
+  /* Canonical Component tokens */
+  --nav-bg:             rgba(250, 248, 245, 0.94);
+  --nav-pill-bg:        #FFFFFF;
+  --nav-text:           var(--text-primary);
+  --nav-text-muted:     #5C5855; /* 7.0:1 AAA contrast against nav pill */
+  --nav-active-bg:      var(--text-primary);
+  --nav-active-text:    var(--color-white);
+  --nav-border:         rgba(29, 29, 27, 0.12);
+  --color-nav-border:   var(--nav-border);
+  --card-bg:            var(--bg-surface);
+  --card-text:          var(--text-primary);
+  --modal-bg:           var(--bg-surface);
+  --modal-text:         var(--text-primary);
+
+  /* Component token aliases */
+  --color-nav-bg:          var(--nav-bg);
+  --color-nav-pill-bg:     var(--nav-pill-bg);
+  --color-nav-text:        var(--nav-text);
+  --color-nav-text-muted:  var(--nav-text-muted);
+  --color-nav-active:      var(--nav-active-bg);
+  --color-nav-active-bg:   var(--nav-active-bg);
+  --color-nav-active-text: var(--nav-active-text);
+  --color-card-bg:         var(--card-bg);
+  --color-card-text:       var(--card-text);
+  --color-card-meta:       var(--text-secondary);
+
+  /* Borders & dividers */
+  --border-subtle:    rgba(29, 29, 27, 0.12);
+  --border-default:   rgba(29, 29, 27, 0.22);
+  --border-strong:    rgba(29, 29, 27, 0.38);
+  --color-border:        var(--border-default);
+  --color-border-strong: var(--border-strong);
+
+  /* Focus & accessibility */
+  --focus-ring:        var(--color-clay);
+  --color-focus:       var(--focus-ring);
+  --focus-ring-offset: var(--bg-page);
+
+  /* Special surfaces */
+  --footer-bg:        var(--color-ink);
+  --footer-text:      #FAF8F5;
+  --trust-pill-bg:    var(--color-sage);
+  --trust-pill-text:  var(--color-white);
+
+  /* Typography */
+  --font-sans:        "DM Sans", "Aptos", "Segoe UI", sans-serif;
+  --font-display:     "Playfair Display", "Cormorant Garamond", Georgia, serif;
+  --font-script:      "Great Vibes", "Dancing Script", "Segoe Script", cursive;
+}
+
+
+
+
+
+@layer base {
+  /* Base body styles */
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--background);
+    color: var(--foreground);
+    line-height: 1.6;
+    max-width: 100vw;
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Smooth scrolling and overflow protection */
+  html {
+    scroll-behavior: smooth;
+    max-width: 100vw;
+    overflow-x: clip;
+  }
+
+  /* Better rendering for buttons and inputs */
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  /* Link reset */
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* List reset */
+  ul, ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Image reset */
+  img, picture, video, canvas, svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  /* Table reset */
+  table {
+    border-collapse: collapse;
+    border-spacing: 0;
+  }
+}
+
+/* Typography utilities */
+.font-display { font-family: var(--font-display); }
+.font-script  { font-family: var(--font-script); }
+
+/* Focus styles for accessibility */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Selection color */
+::selection {
+  background-color: var(--color-clay);
+  color: var(--color-ink);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-canvas);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Utility classes for the Styld design system */
+.ink-text      { color: var(--text-primary); }
+.clay-text     { color: var(--color-clay-text); }
+.sage-text     { color: var(--color-sage); }
+.muted-text    { color: var(--text-muted); }
+
+.ink-bg        { background-color: var(--color-ink); }
+.clay-bg       { background-color: var(--color-clay); }
+.sage-bg       { background-color: var(--color-sage); }
+.white-bg      { background-color: var(--color-white); }
+
+.border-ink    { border-color: var(--color-ink); }
+.border-clay   { border-color: var(--color-clay); }
+.border-sage   { border-color: var(--color-sage); }
+.border-subtle { border-color: var(--border-subtle); }
+
+.focus-ring    { box-shadow: 0 0 0 2px var(--focus-ring-offset), 0 0 0 4px var(--focus-ring); }
+.trust-badge   { background-color: var(--trust-pill-bg); color: var(--trust-pill-text); }
+
+/* Unified beauty card surface utility */
+.beauty-card {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
+}
+
+/* Button Utilities - Guaranteed Visibility & High Contrast in Light and Dark */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  border-radius: 9999px;
+  background-color: var(--action-primary-bg) !important;
+  color: var(--action-primary-text) !important;
+  border: 1px solid transparent !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--action-primary-hover) !important;
+}
+.btn-primary:disabled {
+  background-color: var(--action-disabled-bg) !important;
+  color: var(--action-disabled-text) !important;
+  cursor: not-allowed !important;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  border-radius: 9999px;
+  background-color: var(--bg-surface-raised) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-default) !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--bg-surface-sunken) !important;
+  border-color: var(--border-strong) !important;
+}
+.btn-secondary:disabled {
+  background-color: var(--action-disabled-bg) !important;
+  color: var(--action-disabled-text) !important;
+  cursor: not-allowed !important;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  border-radius: 9999px;
+  background-color: transparent !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-default) !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-ghost:hover:not(:disabled) {
+  background-color: var(--bg-surface-raised) !important;
+}
+
+/* Card & Surface Utilities */
+.auth-card-surface {
+  background-color: var(--auth-card-bg) !important;
+  border: 1px solid var(--auth-card-border) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* ─── UX/interaction gate additions ───────────────────────────────────────────
+   Consumers for tokens emitted by components/theme-applicator.tsx (--zoom,
+   data-reduce-motion, data-high-contrast): without the rules below those
+   attributes are inert (dead controls flagged by styld-ux-audit.cjs).
+   safe-area/dvh rules are forward-compatible: env() resolves to 0px until
+   viewport-fit=cover is enabled; dvh is active in mobile browsers today. */
+html {
+  zoom: var(--zoom, 1);
+  --focus-ring: 0 0 0 3px rgba(61, 55, 48, 0.4);
+}
+html[data-reduce-motion="true"],
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+html[data-high-contrast="true"] {
+  --text-secondary: #2b2621;
+  --text-muted: #45413d;
+  --border-subtle: #8a847e;
+  --border-strong: #45413d;
+  --focus-ring: 0 0 0 3px rgba(43, 38, 33, 0.75);
+}
+html,
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+body {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
